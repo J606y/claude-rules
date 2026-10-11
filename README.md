@@ -2,7 +2,7 @@
 
 每天核对 Claude / Anthropic 官方及上游域名，供 Loon 与 Clash (Meta / Verge / Premium) 将相关连接交给专属代理策略。只维护域名规则，不修改 DNS，不包含节点、代理订阅或证书。
 
-[![每日维护](https://github.com/J606y/claude-rules/actions/workflows/update.yml/badge.svg)](https://github.com/J606y/claude-rules/actions/workflows/update.yml)
+[![更新状态](https://img.shields.io/badge/maintained%20by-Hermes%20Agent-blue)](https://github.com/J606y/claude-rules)
 
 ## 订阅方式
 
@@ -29,13 +29,13 @@ rule-providers:
     behavior: classical
     url: "https://raw.githubusercontent.com/J606y/claude-rules/main/Clash/Claude.yaml"
     path: ./ruleset/Claude.yaml
-    interval: 86400
+    interval: 21600
 
 rules:
   - RULE-SET,Claude,AI
 ```
 
-用本条替换旧的 Claude 远程规则即可，不需要替换整份配置。将 Claude 专用规则放在可能重叠的通用订阅规则之前，并开启 Loon 或 Clash 的远程规则自动更新。仓库更新不等于设备立即刷新，具体刷新间隔以你的客户端设置为准。
+用对应条目替换旧的 Claude 远程规则即可，不需要替换整份配置。将 Claude 专用规则放在可能重叠的通用订阅规则之前，并开启 Loon 或 Clash 的远程规则自动更新。
 
 ## 能解决什么
 
@@ -43,22 +43,14 @@ rules:
 
 规则不会替你选择节点，也不会验证节点的出口国家。若目标是让 Claude 看到非中国 IP，必须给 `AI` 选择实际非中国出口，并通过客户端请求记录确认命中的最终节点；不能仅凭节点名称判断国家。
 
-未列入清单的第三方登录、验证、遥测和自定义连接器仍按原配置分流。本仓库不承诺“绝对零侧漏”，也不会为了扩大覆盖而收录整个 Google、Cloudflare、AWS 或共享 CDN 根域。需要补充第三方主机时，应先依据实际请求记录确认归属。
+未列入清单的第三方登录、验证、遥测和自定义连接器仍按原配置分流。本仓库不承诺“绝对零侧漏”，也不会为了扩大覆盖而收录整个 Google、Cloudflare、AWS 或共享 CDN 根域。
 
-## 每日维护
+## 维护机制
 
-GitHub Actions 每天北京时间 **08:17**（UTC 00:17）计划运行，也支持在 Actions 页面手动执行 `Run workflow`。GitHub 的定时调度可能延迟，不是精确计时服务。
-
-维护流程：
-
-1. 先运行离线边界测试。
-2. 拉取两个来源，验证格式、大小、域名和数量；两份集合一致才接纳新增条目。
-3. 合并人工基线、已发布规则及有效上游，排序去重；不自动删除既有条目。
-4. 校验通过后提交规则和来源摘要；每天另写 `maintenance.json`，记录真实检查时间、规则摘要及 Actions 运行链接。
-
-任一来源下载失败、内容为空、返回 HTML、格式异常、超出限制或双方不一致，本次任务失败，不覆盖仓库里上一版规则。失败详情在 Actions 日志中查看；通知是否送达取决于你的 GitHub 通知设置。
-
-规则文件不带每日变动的时间戳。即使域名未变，每次成功检查仍会更新独立的维护记录，提供可观察的运行证据，也避免仓库长期无活动。`maintenance.json` 记录的是成功校验时间；是否发布成功还应以其链接对应的 Actions 运行结果为准。
+由部署在服务器的 Hermes Agent 守护进程每 6 小时自动从互联网上游（v2fly、MetaCubeX）抓取并严格交叉比对：
+- 双源一致且验证通过后，才接纳新增条目；
+- 失败时自动保留上一版有效规则，绝不丢弃已有规则；
+- 有变动时自动提交推送至 GitHub 仓库。
 
 ## 数据来源与边界
 
@@ -86,8 +78,8 @@ python3 scripts/update.py
 
 ## 回滚与人工清理
 
-如果某次新增规则有问题，先在 Actions 页面暂停该工作流，再通过 GitHub 的提交记录回滚对应变更。发布文件都是普通文本，每次更新均有独立提交，可以对比和恢复。
+如果某次新增规则有问题，通过 GitHub 的提交记录回滚对应变更。发布文件都是普通文本，每次更新均有独立提交，可以对比和恢复。
 
-保留规则是为了防止上游短暂缺项造成漏网，不代表域名永久可信。确认域名已失效或易主后，应人工检查并清理相应的基线与已发布规则，解决上游差异后再恢复自动维护。不要仅回滚生成文件后立刻恢复计划任务，否则仍在上游的条目可能再次被加入。
+保留规则是为了防止上游短暂缺项造成漏网，不代表域名永久可信。确认域名已失效或易主后，应人工检查并清理相应的基线与已发布规则，解决上游差异后再恢复自动维护。
 
 紧急情况下可将订阅 URL 中的 `main` 换成已验证的历史提交 SHA，固定到该版本；恢复正常后再改回 `main`。
