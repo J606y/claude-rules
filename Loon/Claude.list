@@ -1,3 +1,17 @@
+# === WebRTC / STUN Leak Prevention ===
+AND,((PROTOCOL,UDP),(DEST-PORT,3478)),REJECT
+AND,((PROTOCOL,UDP),(DEST-PORT,5349)),REJECT
+# === Claude QUIC / UDP Leak Prevention ===
+AND,((PROTOCOL,UDP),(DOMAIN,servd-anthropic-website.b-cdn.net)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,anthropic.com)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,clau.de)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claude.ai)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claude.com)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claude.dev)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claudemcpclient.com)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claudemcpcontent.com)),REJECT
+AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claudeusercontent.com)),REJECT
+# === Claude Regular Proxy Rules ===
 DOMAIN,servd-anthropic-website.b-cdn.net
 DOMAIN-SUFFIX,anthropic.com
 DOMAIN-SUFFIX,clau.de
