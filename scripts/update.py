@@ -218,8 +218,14 @@ def run_update(root: Path, *, fetcher=None) -> dict[str, int | bool]:
         raise ValueError("Merged rule set exceeds 64 rules; manual review required")
     sorted_rules = sorted(rules)
 
-    # Loon 格式渲染：纯净全协议分流规则（TCP/UDP/QUIC 全部交给用户指定的策略组）
+    # Loon 格式渲染：前置 WebRTC/STUN 阻断 + Claude 专属全协议代理规则（放行并代理 UDP/QUIC）
     loon_lines = [
+        "# === WebRTC / STUN Leak Prevention ===",
+        "AND,((PROTOCOL,UDP),(DEST-PORT,3478)),REJECT",
+        "AND,((PROTOCOL,UDP),(DEST-PORT,5349)),REJECT",
+        "DOMAIN-KEYWORD,stun,REJECT",
+        "# === Claude Full-Protocol Proxy Rules (TCP/UDP/QUIC) ===",
+    ] + [
         f"{kind},{domain}" for kind, domain in sorted_rules
     ]
     rendered = ("\n".join(loon_lines) + "\n").encode("ascii")
@@ -227,6 +233,11 @@ def run_update(root: Path, *, fetcher=None) -> dict[str, int | bool]:
     # Clash 格式渲染 (Classical Rule-set)
     clash_lines = [
         "payload:",
+        "  # === WebRTC / STUN Leak Prevention ===",
+        "  - 'AND,((PROTOCOL,UDP),(DST-PORT,3478))'",
+        "  - 'AND,((PROTOCOL,UDP),(DST-PORT,5349))'",
+        "  - 'DOMAIN-KEYWORD,stun'",
+        "  # === Claude Full-Protocol Proxy Rules (TCP/UDP/QUIC) ===",
     ] + [
         f"  - {kind},{domain}" for kind, domain in sorted_rules
     ]

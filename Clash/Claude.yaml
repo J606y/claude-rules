@@ -1,4 +1,9 @@
 payload:
+  # === WebRTC / STUN Leak Prevention ===
+  - 'AND,((PROTOCOL,UDP),(DST-PORT,3478))'
+  - 'AND,((PROTOCOL,UDP),(DST-PORT,5349))'
+  - 'DOMAIN-KEYWORD,stun'
+  # === Claude Full-Protocol Proxy Rules (TCP/UDP/QUIC) ===
   - DOMAIN,servd-anthropic-website.b-cdn.net
   - DOMAIN-SUFFIX,anthropic.com
   - DOMAIN-SUFFIX,clau.de

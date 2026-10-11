@@ -144,7 +144,7 @@ class GenerationTests(unittest.TestCase):
     def test_generates_policy_free_sorted_rules_and_source_evidence(self):
         summary = self.updater.run_update(self.root, fetcher=self.fetch)
         result = (self.root / "Loon" / "Claude.list").read_bytes()
-        lines = result.decode().splitlines()
+        lines = [l for l in result.decode().splitlines() if l and not l.startswith("#")]
         expected_seeds = {
             "DOMAIN-SUFFIX,anthropic.com", "DOMAIN-SUFFIX,clau.de", "DOMAIN-SUFFIX,claude.ai",
             "DOMAIN-SUFFIX,claude.com", "DOMAIN-SUFFIX,claude.dev",
@@ -152,14 +152,24 @@ class GenerationTests(unittest.TestCase):
             "DOMAIN-SUFFIX,claudeusercontent.com", "DOMAIN,servd-anthropic-website.b-cdn.net",
         }
         all_expected = expected_seeds | {"DOMAIN,api.anthropic.com"}
-        self.assertEqual(set(lines), all_expected)
-        self.assertEqual(lines, sorted(all_expected))
+        # 必须放行 Claude 的所有协议域名规则
+        for item in all_expected:
+            self.assertIn(item, lines)
+        # 必须显式拦截 WebRTC / STUN 泄漏
+        self.assertIn("AND,((PROTOCOL,UDP),(DEST-PORT,3478)),REJECT", lines)
+        self.assertIn("AND,((PROTOCOL,UDP),(DEST-PORT,5349)),REJECT", lines)
+        self.assertIn("DOMAIN-KEYWORD,stun,REJECT", lines)
+
         self.assertEqual(summary, {"added": 10, "retained": 0, "count": 10, "changed": True})
 
         clash_result = (self.root / "Clash" / "Claude.yaml").read_bytes()
-        clash_lines = clash_result.decode().splitlines()
+        clash_lines = [l for l in clash_result.decode().splitlines() if l and not l.strip().startswith("#")]
         self.assertEqual(clash_lines[0], "payload:")
-        self.assertEqual([line[4:] for line in clash_lines[1:]], lines)
+        for item in all_expected:
+            self.assertIn(f"  - {item}", clash_lines)
+        self.assertIn("  - 'AND,((PROTOCOL,UDP),(DST-PORT,3478))'", clash_lines)
+        self.assertIn("  - 'AND,((PROTOCOL,UDP),(DST-PORT,5349))'", clash_lines)
+        self.assertIn("  - 'DOMAIN-KEYWORD,stun'", clash_lines)
 
         metadata = json.loads((self.root / "metadata.json").read_bytes())
         self.assertEqual(metadata["rule_count"], 10)

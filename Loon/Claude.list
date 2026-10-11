@@ -1,3 +1,8 @@
+# === WebRTC / STUN Leak Prevention ===
+AND,((PROTOCOL,UDP),(DEST-PORT,3478)),REJECT
+AND,((PROTOCOL,UDP),(DEST-PORT,5349)),REJECT
+DOMAIN-KEYWORD,stun,REJECT
+# === Claude Full-Protocol Proxy Rules (TCP/UDP/QUIC) ===
 DOMAIN,servd-anthropic-website.b-cdn.net
 DOMAIN-SUFFIX,anthropic.com
 DOMAIN-SUFFIX,clau.de
