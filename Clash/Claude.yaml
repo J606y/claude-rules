@@ -1,18 +1,4 @@
 payload:
-  # === WebRTC / STUN Leak Prevention ===
-  - 'AND,((PROTOCOL,UDP),(DST-PORT,3478))'
-  - 'AND,((PROTOCOL,UDP),(DST-PORT,5349))'
-  # === Claude QUIC / UDP Leak Prevention ===
-  - 'AND,((PROTOCOL,UDP),(DOMAIN,servd-anthropic-website.b-cdn.net))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,anthropic.com))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,clau.de))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claude.ai))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claude.com))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claude.dev))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claudemcpclient.com))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claudemcpcontent.com))'
-  - 'AND,((PROTOCOL,UDP),(DOMAIN-SUFFIX,claudeusercontent.com))'
-  # === Claude Regular Proxy Rules ===
   - DOMAIN,servd-anthropic-website.b-cdn.net
   - DOMAIN-SUFFIX,anthropic.com
   - DOMAIN-SUFFIX,clau.de

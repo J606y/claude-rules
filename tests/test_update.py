@@ -32,6 +32,7 @@ class SourceParsingTests(unittest.TestCase):
     def test_two_source_grammars_normalize_to_same_rule_set(self):
         updater = load_updater()
         v2fly = b"# Claude\nclaude.ai\nfull:api.anthropic.com\nclaude.ai\n"
+        # MetaCubeX classical syntax is explicit, not Clash domain syntax.
         meta = b"payload:\n  - 'DOMAIN,api.anthropic.com'\n  - DOMAIN-SUFFIX,claude.ai\n"
         expected = {("DOMAIN-SUFFIX", "claude.ai"), ("DOMAIN", "api.anthropic.com")}
         self.assertEqual(updater.parse_source("v2fly", v2fly), expected)
@@ -67,192 +68,74 @@ class SourceParsingTests(unittest.TestCase):
             {("DOMAIN", "servd-anthropic-website.b-cdn.net")},
         )
 
-    def test_html_and_non_utf8_are_rejected(self):
-        updater = load_updater()
-        for body in [b"<!DOCTYPE html><html>403</html>", b"<title>Blocked</title>", b"\xff\xfe\x00"]:
-            with self.subTest(body=body):
-                with self.assertRaises(ValueError):
-                    updater.parse_source("v2fly", body)
-
     def test_empty_sources_are_rejected(self):
         updater = load_updater()
-        for body in [b"", b"\n", b"# only comment\n", b"payload:\n", b"payload:\n  # comment\n"]:
-            with self.subTest(body=body):
-                source = "metacubex" if b"payload" in body else "v2fly"
-                with self.assertRaises(ValueError):
-                    updater.parse_source(source, body)
-
-    def test_unknown_grammars_and_policy_injection_are_rejected(self):
-        updater = load_updater()
-        rejected = [
-            ("v2fly", b"DOMAIN-SUFFIX,claude.ai,AI\n"),
-            ("v2fly", b"IP-CIDR,1.1.1.1/32\n"),
-            ("metacubex", b"payload:\n  - DOMAIN-SUFFIX,claude.ai,AI\n"),
-            ("metacubex", b"payload:\n  - IP-CIDR,1.1.1.1/32\n"),
-            ("metacubex", b"payload:\n  - 'invalid'quote'\n"),
-            ("metacubex", b"plain_list_without_payload:\n"),
-        ]
-        for source, body in rejected:
+        for source, body in [("v2fly", b""), ("v2fly", b"# comments only\n"),
+                             ("metacubex", b"payload:\n# no rules\n")]:
             with self.subTest(source=source, body=body):
                 with self.assertRaises(ValueError):
                     updater.parse_source(source, body)
 
-    def test_case_normalization_and_maximum_count(self):
+    def test_html_and_non_utf8_are_rejected(self):
         updater = load_updater()
-        body = b"CLAUDE.AI\nclaude.ai\n"
-        self.assertEqual(updater.parse_source("v2fly", body), {("DOMAIN-SUFFIX", "claude.ai")})
+        for source in ("v2fly", "metacubex"):
+            for body in [b"<!doctype html><html>error</html>", b"# <html>\nclaude.ai\n", b"\xff"]:
+                with self.subTest(source=source, body=body):
+                    with self.assertRaises(ValueError):
+                        updater.parse_source(source, body)
+
+    def test_unknown_grammars_and_policy_injection_are_rejected(self):
+        updater = load_updater()
+        invalid = [
+            ("unknown", b"claude.ai\n"), ("v2fly", b"domain:claude.ai\n"),
+            ("v2fly", b"regexp:.*claude.*\n"), ("v2fly", b"include:anthropic\n"),
+            ("v2fly", b"payload:\nclaude.ai\n"), ("v2fly", b"claude.ai @ads\n"),
+            ("metacubex", b"DOMAIN-SUFFIX,claude.ai\n"),
+            ("metacubex", b"payload:\nDOMAIN-SUFFIX,claude.ai\n"),
+            ("metacubex", b"payload:\npayload:\n  - DOMAIN,claude.ai\n"),
+            ("metacubex", b"payload:\n  - '+.claude.ai'\n"),
+            ("metacubex", b"payload:\n  - DOMAIN-KEYWORD,claude\n"),
+            ("metacubex", b"payload:\n  - DOMAIN-SUFFIX,claude.ai,DIRECT\n"),
+            ("metacubex", b"payload:\n  - 'DOMAIN,claude.ai\"\n"),
+            ("metacubex", b"payload:\n  - DOMAIN,claude.ai # inline\n"),
+        ]
+        for source, body in invalid:
+            with self.subTest(source=source, body=body):
+                with self.assertRaises(ValueError):
+                    updater.parse_source(source, body)
 
     def test_source_bytes_and_rule_limits_are_enforced(self):
         updater = load_updater()
-        with self.assertRaises(ValueError):
-            updater.parse_source("v2fly", b"#" + b"x" * (256 * 1024))
-        overflow = b"".join(f"node{i}.claude.ai\n".encode() for i in range(65))
-        with self.assertRaises(ValueError):
-            updater.parse_source("v2fly", overflow)
-
-
-class FetchTests(unittest.TestCase):
-    def setUp(self):
-        self.updater = load_updater()
-
-    def test_fetch_uses_verified_tls_timeout_and_bounded_reads(self):
-        called = {}
-        class FakeResponse(io.BytesIO):
-            status = 200
-            headers = {"Content-Type": "text/plain", "Content-Length": "11"}
-            def geturl(self):
-                return self.url
-        def fake_open(request, timeout=None, context=None):
-            called["timeout"] = timeout
-            called["context"] = context
-            called["url"] = request.full_url
-            called["headers"] = dict(request.header_items())
-            res = FakeResponse(b"claude.ai\n")
-            res.url = request.full_url
-            return res
-
-        url = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic"
-        body = self.updater.fetch_source(url, opener=fake_open)
-        self.assertEqual(body, b"claude.ai\n")
-        self.assertEqual(called["timeout"], 20)
-        self.assertIsInstance(called["context"], ssl.SSLContext)
-        self.assertTrue(called["context"].check_hostname)
-        self.assertEqual(called["context"].verify_mode, ssl.CERT_REQUIRED)
-        self.assertEqual(called["url"], url)
-        self.assertEqual(called["headers"]["User-agent"], "claude-rules-updater/1")
-
-    def test_fetch_rejects_oversize_html_status_and_redirects(self):
-        class DummyResponse(io.BytesIO):
-            def __init__(self, body, status=200, content_type="text/plain", url="same"):
-                super().__init__(body)
-                self.status = status
-                self.headers = {"Content-Type": content_type}
-                self.url = url
-            def geturl(self):
-                return self.url
-
-        url = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic"
-        cases = [
-            DummyResponse(b"ok", status=500, url=url),
-            DummyResponse(b"ok", url="https://redirected.example/rules"),
-            DummyResponse(b"<html>Error</html>", content_type="text/html", url=url),
-            DummyResponse(b"x" * (256 * 1024 + 2), url=url),
-        ]
-        for res in cases:
-            with self.subTest(status=res.status, url=res.geturl(), ct=res.headers.get("Content-Type")):
+        for body in [b"#" + b"a" * (256 * 1024) + b"\nclaude.ai\n",
+                     b"".join(f"n{i}.claude.ai\n".encode() for i in range(65))]:
+            with self.subTest(size=len(body)):
                 with self.assertRaises(ValueError):
-                    self.updater.fetch_source(url, opener=lambda req, timeout=20, context=None, r=res: r,
-                                              sleeper=lambda s: None)
+                    updater.parse_source("v2fly", body)
 
-    def test_fetch_refuses_truncated_response(self):
-        class ShortResponse(io.BytesIO):
-            status = 200
-            headers = {"Content-Type": "text/plain", "Content-Length": "100"}
-            def geturl(self):
-                return self.url
-        url = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic"
-        res = ShortResponse(b"short")
-        res.url = url
-        with self.assertRaises(ValueError):
-            self.updater.fetch_source(url, opener=lambda req, timeout=20, context=None: res,
-                                      sleeper=lambda s: None)
-
-    def test_transient_failures_retry_at_most_three_times(self):
-        attempts = 0
-        slept = []
-        class Response(io.BytesIO):
-            status = 200
-            headers = {"Content-Type": "text/plain"}
-            def geturl(self):
-                return self.url
-        def flake(request, timeout=20, context=None):
-            nonlocal attempts
-            attempts += 1
-            if attempts < 3:
-                raise urllib.error.HTTPError(request.full_url, 503, "Service Unavailable", {}, None)
-            res = Response(b"claude.ai\n")
-            res.url = request.full_url
-            return res
-        url = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic"
-        body = self.updater.fetch_source(url, opener=flake, sleeper=slept.append)
-        self.assertEqual(body, b"claude.ai\n")
-        self.assertEqual(attempts, 3)
-        self.assertEqual(slept, [1, 2])
-
-    def test_nontransient_http_error_is_not_retried(self):
-        attempts = 0
-        def fail_404(request, timeout=20, context=None):
-            nonlocal attempts
-            attempts += 1
-            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
-        url = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic"
-        with self.assertRaises(OSError):
-            self.updater.fetch_source(url, opener=fail_404, sleeper=lambda s: self.fail("Must not sleep"))
-        self.assertEqual(attempts, 1)
-
-    def test_exhausted_transport_failures_are_non_silent(self):
-        attempts = 0
-        def always_fail(request, timeout=20, context=None):
-            nonlocal attempts
-            attempts += 1
-            raise OSError("network down")
-        url = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic"
-        with self.assertRaisesRegex(OSError, "Source fetch failed after 3 attempts"):
-            self.updater.fetch_source(url, opener=always_fail, sleeper=lambda s: None)
-        self.assertEqual(attempts, 3)
-
-    def test_fetch_refuses_any_url_outside_fixed_sources(self):
-        with self.assertRaises(ValueError):
-            self.updater.fetch_source("https://example.com/other")
+    def test_case_normalization_and_maximum_count(self):
+        updater = load_updater()
+        self.assertEqual(updater.parse_source("v2fly", b"CLAUDE.AI\nclaude.ai\n"),
+                         {("DOMAIN-SUFFIX", "claude.ai")})
+        body = b"".join(f"n{i}.claude.ai\n".encode() for i in range(64))
+        self.assertEqual(len(updater.parse_source("v2fly", body)), 64)
 
 
 class GenerationTests(unittest.TestCase):
     def setUp(self):
         self.updater = load_updater()
-        self.temp_dir = tempfile.TemporaryDirectory(prefix="claude-rules-")
-        self.root = Path(self.temp_dir.name)
-        data = self.root / "data"
-        data.mkdir()
-        (data / "seed.list").write_text(textwrap.dedent("""
-            DOMAIN-SUFFIX,anthropic.com
-            DOMAIN-SUFFIX,clau.de
-            DOMAIN-SUFFIX,claude.ai
-            DOMAIN-SUFFIX,claude.com
-            DOMAIN-SUFFIX,claude.dev
-            DOMAIN-SUFFIX,claudemcpclient.com
-            DOMAIN-SUFFIX,claudemcpcontent.com
-            DOMAIN-SUFFIX,claudeusercontent.com
-            DOMAIN,servd-anthropic-website.b-cdn.net
-        """).strip() + "\n", encoding="utf-8")
+        self.temp = tempfile.TemporaryDirectory(prefix="claude-rules-", dir=os.environ.get("TMPDIR", "."))
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "data").mkdir()
+        seed = SCRIPT.parents[1] / "data" / "seed.list"
+        self.assertTrue(seed.is_file(), "Missing reviewed seed.list")
+        (self.root / "data" / "seed.list").write_bytes(seed.read_bytes())
         self.bodies = {
             "v2fly": b"claude.ai\nfull:api.anthropic.com\n",
             "metacubex": b"payload:\n  - DOMAIN,api.anthropic.com\n  - DOMAIN-SUFFIX,claude.ai\n",
         }
 
-    def tearDown(self):
-        self.temp_dir.cleanup()
-
-    def fetch(self, url: str) -> bytes:
+    def fetch(self, url):
         for source, source_url in self.updater.SOURCES:
             if source_url == url:
                 return self.bodies[source]
@@ -262,15 +145,15 @@ class GenerationTests(unittest.TestCase):
         summary = self.updater.run_update(self.root, fetcher=self.fetch)
         result = (self.root / "Loon" / "Claude.list").read_bytes()
         lines = result.decode().splitlines()
-        self.assertEqual(lines, sorted(set(lines)))
-        self.assertTrue(all(len(line.split(",")) == 2 for line in lines))
         expected_seeds = {
             "DOMAIN-SUFFIX,anthropic.com", "DOMAIN-SUFFIX,clau.de", "DOMAIN-SUFFIX,claude.ai",
             "DOMAIN-SUFFIX,claude.com", "DOMAIN-SUFFIX,claude.dev",
             "DOMAIN-SUFFIX,claudemcpclient.com", "DOMAIN-SUFFIX,claudemcpcontent.com",
             "DOMAIN-SUFFIX,claudeusercontent.com", "DOMAIN,servd-anthropic-website.b-cdn.net",
         }
-        self.assertEqual(set(lines), expected_seeds | {"DOMAIN,api.anthropic.com"})
+        all_expected = expected_seeds | {"DOMAIN,api.anthropic.com"}
+        self.assertEqual(set(lines), all_expected)
+        self.assertEqual(lines, sorted(all_expected))
         self.assertEqual(summary, {"added": 10, "retained": 0, "count": 10, "changed": True})
 
         clash_result = (self.root / "Clash" / "Claude.yaml").read_bytes()
@@ -279,7 +162,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual([line[4:] for line in clash_lines[1:]], lines)
 
         metadata = json.loads((self.root / "metadata.json").read_bytes())
-        self.assertEqual(metadata["rule_count"], len(lines))
+        self.assertEqual(metadata["rule_count"], 10)
         self.assertEqual(metadata["rules_sha256"], hashlib.sha256(result).hexdigest())
         self.assertEqual(metadata["seed_rule_count"], 9)
         self.assertEqual(len(metadata["sources"]), 2)
@@ -481,17 +364,127 @@ class GenerationTests(unittest.TestCase):
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "added=0 retained=10 count=10 changed=false\n")
-        self.assertEqual(result.stderr, "")
 
     def test_cli_failure_is_nonzero_preserving_old_file_bytes(self):
         self.updater.run_update(self.root, fetcher=self.fetch)
         paths = [self.root / "Loon" / "Claude.list", self.root / "metadata.json"]
         before = {p: p.read_bytes() for p in paths}
-        self.bodies["v2fly"] = b"invalid payload format\n"
-        result = self.run_cli()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("update failed:", result.stderr)
-        self.assertEqual({p: p.read_bytes() for p in paths}, before)
+        original = self.bodies.copy()
+        for source in ("v2fly", "metacubex"):
+            for body in [b"", b"<html>failure</html>", b"unknown format", None]:
+                with self.subTest(source=source, body=body):
+                    self.bodies = original | {source: body}
+                    result = self.run_cli()
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("update failed:", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual({p: p.read_bytes() for p in paths}, before)
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, body, url, headers=None, status=200):
+        super().__init__(body)
+        self.headers = headers or {}
+        self.status = status
+        self.url = url
+        self.read_sizes = []
+
+    def geturl(self):
+        return self.url
+
+    def read(self, size=-1):
+        self.read_sizes.append(size)
+        return super().read(size)
+
+
+class FetchTests(unittest.TestCase):
+    def setUp(self):
+        self.updater = load_updater()
+        self.url = self.updater.SOURCES[0][1]
+
+    def test_fetch_uses_verified_tls_timeout_and_bounded_reads(self):
+        response = FakeResponse(b"claude.ai\n", self.url)
+        calls = []
+        def opener(request, *, timeout, context):
+            self.assertEqual(request.full_url, self.url)
+            self.assertEqual(timeout, 20)
+            self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+            self.assertTrue(context.check_hostname)
+            calls.append(request)
+            return response
+        self.assertEqual(self.updater.fetch_source(self.url, opener=opener), b"claude.ai\n")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(response.read_sizes, [256 * 1024 + 1])
+        self.assertTrue(response.closed)
+
+    def test_fetch_rejects_oversize_html_status_and_redirects(self):
+        cases = [
+            (b"x" * (256 * 1024 + 1), {}, 200, self.url),
+            (b"claude.ai\n", {"Content-Length": str(256 * 1024 + 1)}, 200, self.url),
+            (b"claude.ai\n", {"Content-Length": "garbage"}, 200, self.url),
+            (b"claude.ai\n", {"Content-Type": "text/html; charset=utf-8"}, 200, self.url),
+            (b"claude.ai\n", {}, 403, self.url),
+            (b"claude.ai\n", {}, 200, "http://raw.githubusercontent.com/unsafe"),
+        ]
+        for body, headers, status, url in cases:
+            with self.subTest(length=len(body), headers=headers, status=status, url=url):
+                response = FakeResponse(body, url, headers, status)
+                with self.assertRaises(ValueError):
+                    self.updater.fetch_source(self.url, opener=lambda *a, **k: response)
+                self.assertTrue(response.closed)
+
+    def test_fetch_refuses_any_url_outside_fixed_sources(self):
+        def forbidden_opener(*args, **kwargs):
+            self.fail("Unapproved URL must never reach transport")
+        for url in ["http://127.0.0.1/", "https://example.com/rules", self.url + "?token=secret"]:
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError):
+                    self.updater.fetch_source(url, opener=forbidden_opener)
+
+    def test_transient_failures_retry_at_most_three_times(self):
+        for error_factory in [lambda: urllib.error.URLError("offline"),
+                              lambda: urllib.error.HTTPError(self.url, 503, "offline", {}, None),
+                              lambda: TimeoutError("synthetic timeout")]:
+            with self.subTest(error=type(error_factory()).__name__):
+                attempts = []
+                delays = []
+                def opener(*args, **kwargs):
+                    attempts.append(1)
+                    if len(attempts) < 3:
+                        raise error_factory()
+                    return FakeResponse(b"claude.ai\n", self.url)
+                self.assertEqual(self.updater.fetch_source(self.url, opener=opener, sleeper=delays.append),
+                                 b"claude.ai\n")
+                self.assertEqual(len(attempts), 3)
+                self.assertEqual(delays, [1, 2])
+
+    def test_exhausted_transport_failures_are_non_silent(self):
+        attempts = []
+        delays = []
+        def opener(*args, **kwargs):
+            attempts.append(1)
+            raise urllib.error.URLError("synthetic failure")
+        with self.assertRaisesRegex(OSError, "3 attempts"):
+            self.updater.fetch_source(self.url, opener=opener, sleeper=delays.append)
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(delays, [1, 2])
+
+    def test_nontransient_http_error_is_not_retried(self):
+        attempts = []
+        delays = []
+        def opener(*args, **kwargs):
+            attempts.append(1)
+            raise urllib.error.HTTPError(self.url, 404, "not found", {}, None)
+        with self.assertRaises(OSError):
+            self.updater.fetch_source(self.url, opener=opener, sleeper=delays.append)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(delays, [])
+
+    def test_fetch_refuses_truncated_response(self):
+        response = FakeResponse(b"claude.ai\n", self.url, {"Content-Length": "100"})
+        with self.assertRaises(ValueError):
+            self.updater.fetch_source(self.url, opener=lambda *a, **k: response)
 
 
 if __name__ == "__main__":

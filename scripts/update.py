@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed, dependency-free updater for Claude's Loon and Clash routing rules."""
+"""Fail-closed, dependency-free updater for Claude's Loon routing rules."""
 from __future__ import annotations
 
 import hashlib
@@ -150,6 +150,11 @@ def fetch_source(url: str, *, opener=None, sleeper=time.sleep) -> bytes:
 
 
 def atomic_write_outputs(changes: list[tuple[Path, bytes, bytes | None]]) -> None:
+    """Stage every file before rename; roll back handled commit-time I/O errors.
+
+    Renames are atomic per file, not a crash-proof multi-file transaction.
+    The publishing workflow must commit both artifacts only after success.
+    """
     temporary_paths = []
     staged = []
     replaced = []
@@ -213,33 +218,18 @@ def run_update(root: Path, *, fetcher=None) -> dict[str, int | bool]:
         raise ValueError("Merged rule set exceeds 64 rules; manual review required")
     sorted_rules = sorted(rules)
 
-    # Loon 格式渲染：前置防 WebRTC/STUN 泄漏 + 前置防 Claude QUIC/UDP 泄漏 + 基础代理规则
+    # Loon 格式渲染：纯净全协议分流规则（TCP/UDP/QUIC 全部交给用户指定的策略组）
     loon_lines = [
-        "# === WebRTC / STUN Leak Prevention ===",
-        "AND,((PROTOCOL,UDP),(DEST-PORT,3478)),REJECT",
-        "AND,((PROTOCOL,UDP),(DEST-PORT,5349)),REJECT",
-        "# === Claude QUIC / UDP Leak Prevention ===",
+        f"{kind},{domain}" for kind, domain in sorted_rules
     ]
-    for kind, domain in sorted_rules:
-        loon_lines.append(f"AND,((PROTOCOL,UDP),({kind},{domain})),REJECT")
-    loon_lines.append("# === Claude Regular Proxy Rules ===")
-    for kind, domain in sorted_rules:
-        loon_lines.append(f"{kind},{domain}")
     rendered = ("\n".join(loon_lines) + "\n").encode("ascii")
 
     # Clash 格式渲染 (Classical Rule-set)
     clash_lines = [
         "payload:",
-        "  # === WebRTC / STUN Leak Prevention ===",
-        "  - 'AND,((PROTOCOL,UDP),(DST-PORT,3478))'",
-        "  - 'AND,((PROTOCOL,UDP),(DST-PORT,5349))'",
-        "  # === Claude QUIC / UDP Leak Prevention ===",
+    ] + [
+        f"  - {kind},{domain}" for kind, domain in sorted_rules
     ]
-    for kind, domain in sorted_rules:
-        clash_lines.append(f"  - 'AND,((PROTOCOL,UDP),({kind},{domain}))'")
-    clash_lines.append("  # === Claude Regular Proxy Rules ===")
-    for kind, domain in sorted_rules:
-        clash_lines.append(f"  - {kind},{domain}")
     clash_rendered = ("\n".join(clash_lines) + "\n").encode("ascii")
     metadata = {
         "schema_version": 1, "rule_count": len(rules), "seed_rule_count": len(seed),

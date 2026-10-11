@@ -1,19 +1,19 @@
 {
   "rule_count": 9,
-  "rules_sha256": "430268577712ddf82e87900b17169f471cb29fc68a5762d0e74ff1966a3aa822",
+  "rules_sha256": "b2b8e9a3a14980d2bcf8ef4e2ec231894855089533f6f3054af50b8d6636f64f",
   "schema_version": 1,
   "seed_rule_count": 9,
   "sources": [
     {
       "name": "v2fly",
-      "rule_count": 8,
-      "sha256": "802ff937d570566371c1b1c676dffcb74624b455b7a13c907b8bca612e4d0932",
+      "rule_count": 9,
+      "sha256": "bf48dc1b342bbfd06f2a93ee8ce180fc424d9c041dafd2d182ffb3f4186698b4",
       "url": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic"
     },
     {
       "name": "metacubex",
       "rule_count": 9,
-      "sha256": "bb23f5b0ea8d3b7a544cb48c08182740445aee179f8c6ebf269c5e317bb7d5d2",
+      "sha256": "5b59537cd09e1dc487943af6270d739ad3c9a4b41fd22b1df886fe3a7b693f4f",
       "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/classical/anthropic.yaml"
     }
   ]
